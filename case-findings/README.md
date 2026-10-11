@@ -1,4 +1,4 @@
-# Case Findings — plugin Obsidian
+# Case Findings 
 
 Suivi des findings d'une enquête (CTF, DFIR, pentest) : notez vos trouvailles dans un callout `[!finding]`, et une hotkey affiche un tableau filtrable de tout ce que vous avez trouvé dans l'enquête, toutes notes confondues.
 
