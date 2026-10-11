@@ -90,3 +90,4 @@ Code : `src/parser.ts` (parsing pur, testé) et `src/main.ts` (index, vue, comma
 - Onglet graphe (notes ↔ findings, valeurs partagées)
 - Détection automatique des hashes / IP / emails hors callout (désactivable par enquête)
 - Export d'une note récapitulative pour le writeup
+

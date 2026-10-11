@@ -74,6 +74,7 @@ function parseEntry(text) {
     valuePart = rest.slice(0, sep);
     comment = rest.slice(sep + 3).trim();
   }
+  if (!comment) valuePart = valuePart.replace(/\s*\|\s*$/, "");
   const value = cleanValue(valuePart);
   if (!value) return null;
   const image = detectImage(value) ?? (type === "screen" && IMG_EXT_RE.test(value) ? value : void 0);
@@ -158,6 +159,154 @@ function normalizeCases(raw) {
   if (raw === void 0 || raw === null) return [];
   const arr = Array.isArray(raw) ? raw : [raw];
   return arr.map((v) => v === null || v === void 0 ? "" : String(v).trim()).map((v) => v.replace(/^\[\[|\]\]$/g, "")).filter((v) => v.length > 0);
+}
+var PIVOT_TYPES = /* @__PURE__ */ new Set(["pivot", "pivots", "pivote", "pivotto", "next"]);
+var ID_TYPES = /* @__PURE__ */ new Set(["id", "node", "nodeid"]);
+function slug(s) {
+  return s.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+}
+function parseGraph(content, fileKey, calloutNames = ["finding", "findings"]) {
+  const nodes = [];
+  const edges = [];
+  const startRe = buildCalloutRegex(calloutNames);
+  const lines = content.split(/\r?\n/);
+  let inFenceOutside = false;
+  let cur = null;
+  let curExplicitId = null;
+  let inFenceInside = false;
+  const flush = () => {
+    if (cur) {
+      cur.id = curExplicitId || (cur.label ? `${fileKey}/${slug(cur.label)}` : `${fileKey}#${cur.line}`);
+      nodes.push(cur);
+    }
+    cur = null;
+    curExplicitId = null;
+    inFenceInside = false;
+  };
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (!cur) {
+      if (FENCE_RE.test(line)) {
+        inFenceOutside = !inFenceOutside;
+        continue;
+      }
+      if (inFenceOutside) continue;
+      const sm = startRe.exec(line);
+      if (sm) {
+        cur = { id: "", label: sm[1].trim(), line: i, findings: [] };
+      }
+      continue;
+    }
+    const inner = stripQuote(line);
+    if (inner === null) {
+      flush();
+      i--;
+      continue;
+    }
+    if (startRe.test(line) && !inFenceInside) {
+      const sm = startRe.exec(line);
+      flush();
+      cur = { id: "", label: sm[1].trim(), line: i, findings: [] };
+      continue;
+    }
+    if (FENCE_RE.test(inner)) {
+      inFenceInside = !inFenceInside;
+      continue;
+    }
+    if (inFenceInside || /^\s*>/.test(inner)) continue;
+    const e = parseEntry(inner);
+    if (!e) continue;
+    if (ID_TYPES.has(e.type)) {
+      curExplicitId = e.value.trim();
+    } else if (PIVOT_TYPES.has(e.type)) {
+      edges.push({ to: e.value.trim(), label: e.comment, line: i, fromLine: cur.line });
+    } else {
+      cur.findings.push({ ...e, line: i, calloutTitle: cur.label });
+    }
+  }
+  flush();
+  const idByLine = /* @__PURE__ */ new Map();
+  for (const n of nodes) idByLine.set(n.line, n.id);
+  const resolved = edges.map((e) => ({
+    from: idByLine.get(e.fromLine) ?? `${fileKey}#${e.fromLine}`,
+    to: e.to,
+    label: e.label,
+    line: e.line
+  }));
+  return { nodes, edges: resolved };
+}
+function mergeGraphs(graphs) {
+  const nodes = /* @__PURE__ */ new Map();
+  const edges = [];
+  for (const g of graphs) {
+    for (const n of g.nodes) {
+      const prev = nodes.get(n.id);
+      if (prev) prev.findings.push(...n.findings);
+      else nodes.set(n.id, { ...n, findings: [...n.findings] });
+    }
+    edges.push(...g.edges);
+  }
+  for (const e of edges) {
+    for (const id of [e.from, e.to]) {
+      if (!nodes.has(id)) nodes.set(id, { id, label: id, line: -1, findings: [] });
+    }
+  }
+  return { nodes: [...nodes.values()], edges };
+}
+function layoutGraph(graph) {
+  const idset = new Set(graph.nodes.map((n) => n.id));
+  const out = /* @__PURE__ */ new Map();
+  const indeg = /* @__PURE__ */ new Map();
+  for (const n of graph.nodes) {
+    out.set(n.id, []);
+    indeg.set(n.id, 0);
+  }
+  const seen = /* @__PURE__ */ new Set();
+  for (const e of graph.edges) {
+    if (!idset.has(e.from) || !idset.has(e.to)) continue;
+    const key = e.from + "\0" + e.to;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.get(e.from).push(e.to);
+    indeg.set(e.to, (indeg.get(e.to) ?? 0) + 1);
+  }
+  const layer = /* @__PURE__ */ new Map();
+  const queue = graph.nodes.filter((n) => (indeg.get(n.id) ?? 0) === 0).map((n) => n.id);
+  for (const id of queue) layer.set(id, 0);
+  const deg = new Map(indeg);
+  const q = [...queue];
+  let processed = 0;
+  while (q.length) {
+    const id = q.shift();
+    processed++;
+    for (const t of out.get(id) ?? []) {
+      layer.set(t, Math.max(layer.get(t) ?? 0, (layer.get(id) ?? 0) + 1));
+      deg.set(t, (deg.get(t) ?? 0) - 1);
+      if ((deg.get(t) ?? 0) === 0) q.push(t);
+    }
+  }
+  if (processed < graph.nodes.length) {
+    for (const n of graph.nodes) if (!layer.has(n.id)) layer.set(n.id, 0);
+    for (let pass = 0; pass < graph.nodes.length; pass++) {
+      for (const e of graph.edges) {
+        if (!idset.has(e.from) || !idset.has(e.to)) continue;
+        const want = (layer.get(e.from) ?? 0) + 1;
+        if ((layer.get(e.to) ?? 0) < want) layer.set(e.to, want);
+      }
+    }
+  }
+  const byCol = /* @__PURE__ */ new Map();
+  const laid = graph.nodes.map((n) => {
+    const col = layer.get(n.id) ?? 0;
+    const arr = byCol.get(col) ?? [];
+    const node = { ...n, col, row: arr.length };
+    arr.push(node);
+    byCol.set(col, arr);
+    return node;
+  });
+  const cols = Math.max(0, ...laid.map((n) => n.col)) + 1;
+  const rows = Math.max(1, ...[...byCol.values()].map((a) => a.length));
+  return { nodes: laid, edges: graph.edges, cols, rows };
 }
 
 // src/main.ts
@@ -365,13 +514,18 @@ var CaseFindingsPlugin = class extends import_obsidian.Plugin {
     const cache = this.app.metadataCache.getFileCache(file);
     const cases = normalizeCases(cache?.frontmatter?.[this.settings.caseField]);
     let findings = [];
+    let graph = { nodes: [], edges: [] };
     try {
       const content = data ?? await this.app.vault.cachedRead(file);
-      if (content.includes("[!")) findings = parseFindings(content, this.calloutNames());
+      if (content.includes("[!")) {
+        const names = this.calloutNames();
+        findings = parseFindings(content, names);
+        graph = parseGraph(content, file.basename, names);
+      }
     } catch (e) {
       console.error("[case-findings] lecture impossible", file.path, e);
     }
-    if (findings.length || cases.length) this.index.set(file.path, { file, cases, findings });
+    if (findings.length || cases.length || graph.nodes.length) this.index.set(file.path, { file, cases, findings, graph });
     else this.index.delete(file.path);
   }
   allCases() {
@@ -388,6 +542,15 @@ var CaseFindingsPlugin = class extends import_obsidian.Plugin {
     if (!file) return [];
     const cache = this.app.metadataCache.getFileCache(file);
     return normalizeCases(cache?.frontmatter?.[this.settings.caseField]);
+  }
+  graphForScope(scope) {
+    const graphs = [];
+    for (const n of this.index.values()) if (scope(n) && n.graph.nodes.length) graphs.push(n.graph);
+    return mergeGraphs(graphs);
+  }
+  nodeFile(id) {
+    for (const n of this.index.values()) if (n.graph.nodes.some((g) => g.id === id)) return n.file;
+    return null;
   }
   rows() {
     const out = [];
@@ -503,6 +666,8 @@ var FindingsView = class extends import_obsidian.ItemView {
     this.typeFilter = "";
     this.sortKey = "source";
     this.sortAsc = true;
+    this.mode = "table";
+    this.gz = { scale: 1, x: 0, y: 0 };
     this.searchInput = null;
     this.plugin = plugin;
     this.follow = plugin.settings.followActiveNote;
@@ -540,10 +705,14 @@ var FindingsView = class extends import_obsidian.ItemView {
     }
     return false;
   }
+  scopePredicate() {
+    if (this.currentCase === ALL) return () => true;
+    if (this.currentCase === NONE) return (n) => n.cases.length === 0;
+    return (n) => n.cases.includes(this.currentCase);
+  }
   scopedRows(all) {
-    if (this.currentCase === ALL) return all;
-    if (this.currentCase === NONE) return all.filter((r) => r.cases.length === 0);
-    return all.filter((r) => r.cases.includes(this.currentCase));
+    const p = this.scopePredicate();
+    return all.filter((r) => p(r));
   }
   matches(r) {
     if (this.typeFilter && r.type !== this.typeFilter) return false;
@@ -620,11 +789,28 @@ var FindingsView = class extends import_obsidian.ItemView {
       m.addItem(
         (i) => i.setTitle("Copier les valeurs uniquement").setIcon("list").onClick(() => this.copy([...new Set(visible.map((r) => r.value))].join("\n"), "Valeurs copi\xE9es"))
       );
+      m.addSeparator();
+      m.addItem(
+        (i) => i.setTitle("Copier le graphe en Mermaid").setIcon("git-fork").onClick(() => this.copy(toMermaid(this.plugin.graphForScope(this.scopePredicate())), "Graphe Mermaid copi\xE9"))
+      );
       m.showAtMouseEvent(evt);
     });
     const refreshBtn = header.createEl("button", { cls: "clickable-icon cf-icon-btn", attr: { "aria-label": "R\xE9indexer le vault" } });
     (0, import_obsidian.setIcon)(refreshBtn, "refresh-cw");
     refreshBtn.addEventListener("click", () => void this.plugin.reindexAll());
+    const modeBtn = header.createEl("button", {
+      cls: "clickable-icon cf-icon-btn",
+      attr: { "aria-label": this.mode === "table" ? "Vue graphe (chemin d'attaque)" : "Vue tableau" }
+    });
+    (0, import_obsidian.setIcon)(modeBtn, this.mode === "table" ? "git-fork" : "table");
+    modeBtn.addEventListener("click", () => {
+      this.mode = this.mode === "table" ? "graph" : "table";
+      this.render();
+    });
+    if (this.mode === "graph") {
+      this.renderGraph(el);
+      return;
+    }
     const searchWrap = el.createDiv({ cls: "cf-search" });
     const input = searchWrap.createEl("input", {
       type: "search",
@@ -750,6 +936,180 @@ var FindingsView = class extends import_obsidian.ItemView {
     (0, import_obsidian.setIcon)(copyBtn, "copy");
     copyBtn.addEventListener("click", () => this.copy(r.value, `Copi\xE9 : ${truncate(r.value, 40)}`));
   }
+  renderGraph(el) {
+    const graph = this.plugin.graphForScope(this.scopePredicate());
+    const host = el.createDiv({ cls: "cf-graph-host" });
+    if (!graph.nodes.length) {
+      const box = host.createDiv({ cls: "cf-empty" });
+      box.createEl("p", { text: "Aucune \xE9tape \xE0 afficher dans ce graphe." });
+      box.createEl("p", { text: "Donne un id \xE0 une \xE9tape et relie-la \xE0 la suivante :" });
+      box.createEl("pre").createEl("code", {
+        text: "> [!finding] WordPress\n> id:: wordpress\n> url:: http://.../wp-admin | admin:admin\n> pivot:: webserver | upload plugin PHP (RCE)\n\n> [!finding] Serveur web\n> id:: webserver\n> cmd:: sudo -l | NOPASSWD vim"
+      });
+      return;
+    }
+    const lay = layoutGraph(graph);
+    const NODE_W = 210;
+    const NODE_H = 148;
+    const COL = 290;
+    const ROWH = 184;
+    const PAD = 36;
+    const colCount = lay.cols;
+    const rowCount = Math.max(1, ...Array.from({ length: colCount }, (_, c) => lay.nodes.filter((n) => n.col === c).length));
+    const W = PAD * 2 + Math.max(1, colCount) * COL - (COL - NODE_W);
+    const H = PAD * 2 + Math.max(1, rowCount) * ROWH - (ROWH - NODE_H);
+    const pos = /* @__PURE__ */ new Map();
+    for (const n of lay.nodes) pos.set(n.id, { x: PAD + n.col * COL, y: PAD + n.row * ROWH, n });
+    const bar = host.createDiv({ cls: "cf-graph-bar" });
+    const mk = (icon, label, fn) => {
+      const b = bar.createEl("button", { cls: "clickable-icon cf-icon-btn", attr: { "aria-label": label } });
+      (0, import_obsidian.setIcon)(b, icon);
+      b.addEventListener("click", fn);
+    };
+    const canvas = host.createDiv({ cls: "cf-graph-canvas" });
+    const svgNS = "http://www.w3.org/2000/svg";
+    const svg = document.createElementNS(svgNS, "svg");
+    svg.setAttribute("class", "cf-graph-svg");
+    svg.setAttribute("width", "100%");
+    svg.setAttribute("height", "100%");
+    canvas.appendChild(svg);
+    const defs = document.createElementNS(svgNS, "defs");
+    defs.innerHTML = '<marker id="cf-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--text-accent)"></path></marker>';
+    svg.appendChild(defs);
+    const root = document.createElementNS(svgNS, "g");
+    svg.appendChild(root);
+    const apply = () => root.setAttribute("transform", `translate(${this.gz.x},${this.gz.y}) scale(${this.gz.scale})`);
+    const fit = () => {
+      const rect = canvas.getBoundingClientRect();
+      const s = Math.min((rect.width - 20) / W, (rect.height - 20) / H, 1.2);
+      this.gz.scale = s > 0 && isFinite(s) ? s : 1;
+      this.gz.x = Math.max(10, (rect.width - W * this.gz.scale) / 2);
+      this.gz.y = 16;
+      apply();
+    };
+    for (const e of lay.edges) {
+      const a = pos.get(e.from);
+      const b = pos.get(e.to);
+      if (!a || !b) continue;
+      const x1 = a.x + NODE_W;
+      const y1 = a.y + NODE_H / 2;
+      const x2 = b.x;
+      const y2 = b.y + NODE_H / 2;
+      const dx = Math.max(40, Math.abs(x2 - x1) / 2);
+      const path = document.createElementNS(svgNS, "path");
+      path.setAttribute("class", "cf-edge");
+      path.setAttribute("d", `M ${x1} ${y1} C ${x1 + dx} ${y1}, ${x2 - dx} ${y2}, ${x2} ${y2}`);
+      path.setAttribute("marker-end", "url(#cf-arrow)");
+      root.appendChild(path);
+      if (e.label) {
+        const mx = (x1 + x2) / 2;
+        const my = (y1 + y2) / 2 - 6;
+        const t = document.createElementNS(svgNS, "text");
+        t.setAttribute("class", "cf-edge-label");
+        t.setAttribute("x", String(mx));
+        t.setAttribute("y", String(my));
+        t.setAttribute("text-anchor", "middle");
+        t.textContent = e.label.length > 32 ? e.label.slice(0, 31) + "\u2026" : e.label;
+        const bg = document.createElementNS(svgNS, "rect");
+        bg.setAttribute("class", "cf-edge-label-bg");
+        root.appendChild(bg);
+        root.appendChild(t);
+        const bb = safeBBox(t);
+        bg.setAttribute("x", String(bb.x - 4));
+        bg.setAttribute("y", String(bb.y - 2));
+        bg.setAttribute("width", String(bb.width + 8));
+        bg.setAttribute("height", String(bb.height + 4));
+        bg.setAttribute("rx", "3");
+      }
+    }
+    for (const { x, y, n } of pos.values()) {
+      const fo = document.createElementNS(svgNS, "foreignObject");
+      fo.setAttribute("x", String(x));
+      fo.setAttribute("y", String(y));
+      fo.setAttribute("width", String(NODE_W));
+      fo.setAttribute("height", String(NODE_H));
+      const card = document.createElement("div");
+      card.className = "cf-gnode" + (n.line < 0 ? " cf-gnode-ghost" : "");
+      card.style.setProperty("--cf-hue", String(hueOf(n.id)));
+      const title = card.createDiv({ cls: "cf-gnode-title", text: n.label });
+      if (n.line >= 0) {
+        title.addClass("cf-clickable");
+        title.setAttr("aria-label", "Ouvrir la note");
+        title.addEventListener("click", (evt) => {
+          evt.stopPropagation();
+          const nf = this.plugin.nodeFile(n.id);
+          if (nf) void this.openAt(nf, n.line, import_obsidian.Keymap.isModEvent(evt));
+        });
+      } else {
+        card.createDiv({ cls: "cf-gnode-ghost-tag", text: "\xE0 documenter" });
+      }
+      const list = card.createDiv({ cls: "cf-gnode-findings" });
+      for (const f of n.findings.slice(0, 5)) {
+        const row = list.createDiv({ cls: "cf-gnode-finding" });
+        const b = row.createSpan({ cls: "cf-gnode-ftype" });
+        b.style.setProperty("--cf-hue", String(hueOf(f.type)));
+        (0, import_obsidian.setIcon)(b.createSpan(), TYPE_ICONS[f.type] ?? "tag");
+        const code = row.createEl("code", { cls: "cf-gnode-fval", text: truncate(f.value, 22), attr: { "aria-label": f.value + " (cliquer pour copier)" } });
+        code.addEventListener("click", (evt) => {
+          evt.stopPropagation();
+          this.copy(f.value, `Copi\xE9 : ${truncate(f.value, 40)}`);
+        });
+      }
+      if (n.findings.length > 5) list.createDiv({ cls: "cf-gnode-more", text: `+${n.findings.length - 5}` });
+      fo.appendChild(card);
+      root.appendChild(fo);
+    }
+    mk("maximize", "Ajuster \xE0 la fen\xEAtre", fit);
+    mk("zoom-in", "Zoom +", () => {
+      this.gz.scale = Math.min(2.5, this.gz.scale * 1.2);
+      apply();
+    });
+    mk("zoom-out", "Zoom \u2212", () => {
+      this.gz.scale = Math.max(0.2, this.gz.scale / 1.2);
+      apply();
+    });
+    bar.createSpan({ cls: "cf-graph-hint", text: `${lay.nodes.length} \xE9tapes \xB7 glisser pour d\xE9placer, molette pour zoomer` });
+    let dragging = false;
+    let sx = 0;
+    let sy = 0;
+    canvas.addEventListener("pointerdown", (ev) => {
+      if (ev.target.closest(".cf-gnode-title, code")) return;
+      dragging = true;
+      sx = ev.clientX - this.gz.x;
+      sy = ev.clientY - this.gz.y;
+      canvas.setPointerCapture(ev.pointerId);
+      canvas.addClass("is-dragging");
+    });
+    canvas.addEventListener("pointermove", (ev) => {
+      if (!dragging) return;
+      this.gz.x = ev.clientX - sx;
+      this.gz.y = ev.clientY - sy;
+      apply();
+    });
+    const stop = () => {
+      dragging = false;
+      canvas.removeClass("is-dragging");
+    };
+    canvas.addEventListener("pointerup", stop);
+    canvas.addEventListener("pointerleave", stop);
+    canvas.addEventListener(
+      "wheel",
+      (ev) => {
+        ev.preventDefault();
+        const rect = canvas.getBoundingClientRect();
+        const mx = ev.clientX - rect.left;
+        const my = ev.clientY - rect.top;
+        const factor = ev.deltaY < 0 ? 1.1 : 1 / 1.1;
+        const ns = Math.min(2.5, Math.max(0.2, this.gz.scale * factor));
+        this.gz.x = mx - (mx - this.gz.x) * (ns / this.gz.scale);
+        this.gz.y = my - (my - this.gz.y) * (ns / this.gz.scale);
+        this.gz.scale = ns;
+        apply();
+      },
+      { passive: false }
+    );
+    window.setTimeout(fit, 30);
+  }
   renderEmpty(el) {
     const box = el.createDiv({ cls: "cf-empty" });
     const label = this.currentCase === ALL ? "le vault" : this.currentCase === NONE ? "les notes sans case:" : `l'enqu\xEAte \xAB ${this.currentCase} \xBB`;
@@ -825,6 +1185,29 @@ function toMarkdown(rows) {
 }
 function csvCell(s) {
   return /[",;\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+}
+function safeBBox(t) {
+  try {
+    return t.getBBox();
+  } catch {
+    return { x: 0, y: 0, width: 40, height: 14 };
+  }
+}
+function mId(id) {
+  return "n_" + id.replace(/[^a-zA-Z0-9]/g, "_");
+}
+function toMermaid(graph) {
+  const lines = ["```mermaid", "flowchart LR"];
+  for (const n of graph.nodes) {
+    const label = (n.label || n.id).replace(/"/g, "'");
+    lines.push(`    ${mId(n.id)}["${label}"]`);
+  }
+  for (const e of graph.edges) {
+    const l = e.label ? `|"${e.label.replace(/"/g, "'")}"|` : "";
+    lines.push(`    ${mId(e.from)} -->${l} ${mId(e.to)}`);
+  }
+  lines.push("```");
+  return lines.join("\n");
 }
 function toCsv(rows) {
   const lines = ["type,value,comment,note,line,case"];

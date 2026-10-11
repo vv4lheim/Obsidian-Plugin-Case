@@ -280,3 +280,128 @@
 .markdown-rendered .callout[data-callout="findings"] {
 	container-type: inline-size;
 }
+
+/* ---------- Vue graphe ---------- */
+.cf-graph-host {
+	display: flex;
+	flex-direction: column;
+	height: calc(100% - 44px);
+	min-height: 320px;
+}
+.cf-graph-bar {
+	display: flex;
+	align-items: center;
+	gap: 4px;
+	padding: 2px 0 6px;
+}
+.cf-graph-hint {
+	color: var(--text-faint);
+	font-size: var(--font-ui-smaller);
+	margin-left: 6px;
+}
+.cf-graph-canvas {
+	position: relative;
+	flex: 1;
+	overflow: hidden;
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-m);
+	background:
+		radial-gradient(circle, var(--background-modifier-border) 1px, transparent 1px) 0 0 / 22px 22px,
+		var(--background-primary);
+	cursor: grab;
+}
+.cf-graph-canvas.is-dragging {
+	cursor: grabbing;
+}
+.cf-graph-svg {
+	display: block;
+	user-select: none;
+}
+.cf-edge {
+	fill: none;
+	stroke: var(--text-accent);
+	stroke-width: 1.6px;
+	opacity: 0.8;
+}
+.cf-edge-label {
+	fill: var(--text-normal);
+	font-size: 11px;
+	font-family: var(--font-interface);
+}
+.cf-edge-label-bg {
+	fill: var(--background-primary);
+	opacity: 0.9;
+}
+.cf-gnode {
+	box-sizing: border-box;
+	width: 100%;
+	height: 100%;
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+	padding: 8px 10px;
+	border: 1px solid hsla(var(--cf-hue), 45%, 50%, 0.5);
+	border-left: 3px solid hsl(var(--cf-hue), 55%, 50%);
+	border-radius: var(--radius-m);
+	background: var(--background-secondary);
+	box-shadow: var(--shadow-s);
+	overflow: hidden;
+}
+.cf-gnode-ghost {
+	border-style: dashed;
+	opacity: 0.8;
+	background: var(--background-primary);
+}
+.cf-gnode-ghost-tag {
+	font-size: var(--font-ui-smaller);
+	color: var(--text-warning);
+}
+.cf-gnode-title {
+	font-weight: var(--font-semibold);
+	font-size: var(--font-ui-small);
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+.cf-gnode-title.cf-clickable {
+	cursor: pointer;
+	color: hsl(var(--cf-hue), 55%, 45%);
+}
+.theme-dark .cf-gnode-title.cf-clickable {
+	color: hsl(var(--cf-hue), 70%, 70%);
+}
+.cf-gnode-title.cf-clickable:hover {
+	text-decoration: underline;
+}
+.cf-gnode-findings {
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+	overflow: hidden;
+}
+.cf-gnode-finding {
+	display: flex;
+	align-items: center;
+	gap: 5px;
+	min-width: 0;
+}
+.cf-gnode-ftype svg {
+	width: 12px;
+	height: 12px;
+	color: hsl(var(--cf-hue), 60%, 55%);
+	flex: 0 0 auto;
+}
+.cf-gnode-fval {
+	font-size: var(--font-ui-smaller);
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	cursor: copy;
+	background: var(--background-primary);
+	padding: 0 4px;
+	border-radius: var(--radius-s);
+}
+.cf-gnode-more {
+	color: var(--text-faint);
+	font-size: var(--font-ui-smaller);
+}
