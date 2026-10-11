@@ -15,8 +15,7 @@ Suivi des findings d'une enquête (CTF, DFIR, pentest) : notez vos trouvailles d
 
 ## Utilisation
 
-
-![[/img/findings.png]]
+![findings](/img/findings.png)
 
 ### 1. Rattacher les notes à une enquête
 
