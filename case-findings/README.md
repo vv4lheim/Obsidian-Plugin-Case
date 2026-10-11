@@ -1,15 +1,15 @@
 # Case Findings — plugin Obsidian
 
-Suivi des findings d'une enquête (CTF, DFIR, pentest) : tu notes tes trouvailles dans un callout `[!finding]`, et une hotkey t'affiche un tableau filtrable de tout ce que tu as trouvé dans l'enquête, toutes notes confondues.
+Suivi des findings d'une enquête (CTF, DFIR, pentest) : notez vos trouvailles dans un callout `[!finding]`, et une hotkey affiche un tableau filtrable de tout ce que vous avez trouvé dans l'enquête, toutes notes confondues.
 
 ## Installation
 
-1. Ferme Obsidian (ou pas, ça marche aussi à chaud).
+1. Fermez Obsidian.
 2. Copie le dossier `case-findings/` (celui qui contient `main.js`, `manifest.json`, `styles.css`) dans :
    ```
-   <ton vault>/.obsidian/plugins/case-findings/
+   <vault>/.obsidian/plugins/case-findings/
    ```
-3. Obsidian → **Paramètres → Plugins communautaires** → désactive le mode restreint si besoin → active **Case Findings**.
+3. Obsidian → **Paramètres → Plugins communautaires** → désactivez le mode restreint si besoin → activez **Case Findings**.
 
 > Avec Nextcloud : le dossier `.obsidian/plugins/` se synchronise comme le reste, le plugin sera dispo sur tes autres machines.
 
