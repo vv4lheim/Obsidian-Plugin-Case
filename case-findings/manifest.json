@@ -1,0 +1,9 @@
+{
+	"id": "case-findings",
+	"name": "Case Findings",
+	"version": "0.1.0",
+	"minAppVersion": "1.5.0",
+	"description": "Suivi des findings d'une enquête (CTF / DFIR) : callouts [!finding], tableau filtrable par case:, copie en un clic.",
+	"author": "n3mo",
+	"isDesktopOnly": false
+}

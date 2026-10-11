@@ -1,0 +1,282 @@
+/* ---------- Callout [!finding] dans les notes ---------- */
+.callout[data-callout="finding"],
+.callout[data-callout="findings"] {
+	--callout-color: 230, 92, 92;
+	--callout-icon: lucide-crosshair;
+}
+
+/* ---------- Panneau ---------- */
+.cf-view {
+	container-type: inline-size;
+	padding: var(--size-4-2) var(--size-4-3);
+	font-size: var(--font-ui-small);
+}
+
+.cf-header {
+	display: flex;
+	align-items: center;
+	gap: var(--size-4-1);
+	margin-bottom: var(--size-4-2);
+}
+.cf-case-select {
+	flex: 1;
+	min-width: 0;
+}
+.cf-icon-btn.is-active {
+	color: var(--interactive-accent);
+}
+
+.cf-search input {
+	width: 100%;
+	margin-bottom: var(--size-4-2);
+}
+
+.cf-chips {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 4px;
+	margin-bottom: var(--size-4-3);
+}
+.cf-chip {
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	padding: 2px 8px;
+	height: auto;
+	border-radius: 999px;
+	font-size: var(--font-ui-smaller);
+	background: var(--background-secondary);
+	border: 1px solid var(--background-modifier-border);
+	box-shadow: none;
+	cursor: pointer;
+}
+.cf-chip.is-active {
+	background: var(--interactive-accent);
+	color: var(--text-on-accent);
+	border-color: var(--interactive-accent);
+}
+.cf-chip-icon svg {
+	width: 12px;
+	height: 12px;
+	color: hsl(var(--cf-hue), 60%, 55%);
+}
+.cf-chip.is-active .cf-chip-icon svg {
+	color: inherit;
+}
+.cf-chip-count {
+	opacity: 0.7;
+	font-variant-numeric: tabular-nums;
+}
+
+/* ---------- Tableau ---------- */
+.cf-table {
+	width: 100%;
+	border-collapse: collapse;
+}
+.cf-table th {
+	text-align: left;
+	font-weight: var(--font-semibold);
+	color: var(--text-muted);
+	font-size: var(--font-ui-smaller);
+	text-transform: uppercase;
+	letter-spacing: 0.04em;
+	padding: 4px 6px;
+	border-bottom: 1px solid var(--background-modifier-border);
+	white-space: nowrap;
+}
+.cf-table th.cf-sortable {
+	cursor: pointer;
+}
+.cf-table th.cf-sortable:hover {
+	color: var(--text-normal);
+}
+.cf-table td {
+	padding: 6px;
+	vertical-align: top;
+	border-bottom: 1px solid var(--background-modifier-border-hover);
+}
+.cf-table tbody tr:hover {
+	background: var(--background-modifier-hover);
+}
+
+.cf-badge {
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	padding: 1px 7px;
+	border-radius: 999px;
+	font-size: var(--font-ui-smaller);
+	font-weight: var(--font-semibold);
+	white-space: nowrap;
+	color: hsl(var(--cf-hue), 55%, 40%);
+	background: hsla(var(--cf-hue), 70%, 50%, 0.14);
+}
+.theme-dark .cf-badge {
+	color: hsl(var(--cf-hue), 70%, 72%);
+	background: hsla(var(--cf-hue), 70%, 50%, 0.2);
+}
+.cf-badge-icon svg {
+	width: 12px;
+	height: 12px;
+}
+
+.cf-col-value {
+	max-width: 0; /* permet au texte long de passer à la ligne */
+	width: 40%;
+}
+.cf-value {
+	cursor: copy;
+	word-break: break-all;
+	white-space: pre-wrap;
+}
+.cf-value:hover {
+	outline: 1px solid var(--interactive-accent);
+}
+.cf-thumb {
+	max-width: 100%;
+	max-height: 120px;
+	border-radius: var(--radius-s);
+	cursor: zoom-in;
+	display: block;
+}
+.cf-thumb-name {
+	color: var(--text-faint);
+	font-size: var(--font-ui-smaller);
+	word-break: break-all;
+}
+.cf-links {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 6px;
+	margin-top: 3px;
+	font-size: var(--font-ui-smaller);
+}
+.cf-dup,
+.cf-cross {
+	cursor: pointer;
+	padding: 0 5px;
+	border-radius: var(--radius-s);
+}
+.cf-dup {
+	color: var(--text-warning);
+	background: rgba(var(--color-yellow-rgb), 0.12);
+}
+.cf-cross {
+	color: var(--text-accent);
+	background: rgba(var(--color-blue-rgb), 0.12);
+}
+
+.cf-col-comment {
+	color: var(--text-muted);
+}
+.cf-col-source {
+	white-space: nowrap;
+}
+.cf-source-link {
+	font-size: var(--font-ui-smaller);
+}
+.cf-callout-title {
+	color: var(--text-faint);
+	font-size: var(--font-ui-smaller);
+	white-space: normal;
+}
+.cf-col-actions {
+	width: 1%;
+}
+
+.cf-footer {
+	margin-top: var(--size-4-2);
+	color: var(--text-faint);
+	font-size: var(--font-ui-smaller);
+}
+
+.cf-empty {
+	color: var(--text-muted);
+}
+.cf-empty pre {
+	font-size: var(--font-ui-smaller);
+}
+.cf-muted {
+	color: var(--text-faint);
+	font-size: var(--font-ui-smaller);
+}
+
+/* ---------- Panneau étroit : une carte par finding ---------- */
+@container (max-width: 520px) {
+	.cf-table thead {
+		display: none;
+	}
+	.cf-table,
+	.cf-table tbody,
+	.cf-table tr,
+	.cf-table td {
+		display: block;
+		width: 100%;
+		max-width: none;
+	}
+	.cf-table tr {
+		position: relative;
+		padding: 8px 32px 8px 4px;
+		border-bottom: 1px solid var(--background-modifier-border);
+	}
+	.cf-table td {
+		border: none;
+		padding: 2px 0;
+	}
+	.cf-col-actions {
+		position: absolute;
+		top: 6px;
+		right: 0;
+		width: auto !important;
+	}
+	.cf-col-source {
+		white-space: normal;
+	}
+}
+
+/* ---------- Rendu du callout dans la note ---------- */
+.callout[data-callout="finding"],
+.callout[data-callout="findings"] {
+	border-left: 3px solid rgb(var(--callout-color));
+	background-color: rgba(var(--callout-color), 0.06);
+	border-radius: var(--radius-s);
+}
+.callout[data-callout="finding"] > .callout-title,
+.callout[data-callout="findings"] > .callout-title {
+	color: rgb(var(--callout-color));
+}
+.cf-callout-list {
+	display: grid;
+	grid-template-columns: max-content minmax(0, 1fr) minmax(0, auto);
+	gap: 6px 12px;
+	align-items: start;
+}
+.cf-callout-row {
+	display: contents;
+}
+.cf-callout-value {
+	min-width: 0;
+}
+.cf-callout-value img {
+	max-height: 220px;
+	border-radius: var(--radius-s);
+}
+.cf-callout-comment {
+	color: var(--text-muted);
+	font-size: var(--font-ui-small);
+}
+.cf-callout-extra {
+	margin-top: 8px;
+}
+@container (max-width: 520px) {
+	.cf-callout-list {
+		grid-template-columns: max-content minmax(0, 1fr);
+	}
+	.cf-callout-comment {
+		grid-column: 2;
+	}
+}
+.markdown-rendered .callout[data-callout="finding"],
+.markdown-rendered .callout[data-callout="findings"] {
+	container-type: inline-size;
+}
