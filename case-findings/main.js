@@ -98,6 +98,36 @@ function findSeparator(s) {
   }
   return -1;
 }
+function splitTopLevel(s, sep) {
+  const parts = [];
+  let inCode = false;
+  let depth = 0;
+  let last = 0;
+  for (let i = 0; i <= s.length - sep.length; i++) {
+    const c = s[i];
+    if (c === "`") inCode = !inCode;
+    else if (!inCode && c === "[" && s[i + 1] === "[") {
+      depth++;
+      i++;
+    } else if (!inCode && c === "]" && s[i + 1] === "]" && depth > 0) {
+      depth--;
+      i++;
+    } else if (!inCode && depth === 0 && s.substr(i, sep.length) === sep) {
+      parts.push(s.slice(last, i));
+      i += sep.length - 1;
+      last = i + 1;
+    }
+  }
+  parts.push(s.slice(last));
+  return parts;
+}
+function expandWith(inner) {
+  if (!/\swith\s/i.test(inner)) return [inner];
+  const segs = splitTopLevel(inner, " with ");
+  if (segs.length < 2) return [inner];
+  if (!segs.every((seg) => /[A-Za-z0-9_][\w\-.]*::/.test(seg))) return [inner];
+  return segs.map((x) => x.trim());
+}
 function parseFindings(content, calloutNames = ["finding", "findings"]) {
   const out = [];
   const startRe = buildCalloutRegex(calloutNames);
@@ -119,9 +149,9 @@ function parseFindings(content, calloutNames = ["finding", "findings"]) {
         inCallout = true;
         inFenceInside = false;
         title = sm2[1].trim();
-        const e2 = parseEntry(title);
-        if (e2) {
-          out.push({ ...e2, line: i, calloutTitle: "" });
+        const e = parseEntry(title);
+        if (e) {
+          out.push({ ...e, line: i, calloutTitle: "" });
           title = "";
         }
       }
@@ -137,9 +167,9 @@ function parseFindings(content, calloutNames = ["finding", "findings"]) {
     const sm = startRe.exec(line);
     if (sm && !inFenceInside) {
       title = sm[1].trim();
-      const e2 = parseEntry(title);
-      if (e2) {
-        out.push({ ...e2, line: i, calloutTitle: "" });
+      const e = parseEntry(title);
+      if (e) {
+        out.push({ ...e, line: i, calloutTitle: "" });
         title = "";
       }
       continue;
@@ -150,8 +180,16 @@ function parseFindings(content, calloutNames = ["finding", "findings"]) {
     }
     if (inFenceInside) continue;
     if (/^\s*>/.test(inner)) continue;
-    const e = parseEntry(inner);
-    if (e) out.push({ ...e, line: i, calloutTitle: title });
+    const segs = expandWith(inner);
+    if (segs.length > 1) {
+      for (const seg of segs) {
+        const e = parseEntry(seg);
+        if (e) out.push({ ...e, line: i, calloutTitle: title, tuple: true });
+      }
+    } else {
+      const e = parseEntry(inner);
+      if (e) out.push({ ...e, line: i, calloutTitle: title });
+    }
   }
   return out;
 }
@@ -214,14 +252,16 @@ function parseGraph(content, fileKey, calloutNames = ["finding", "findings"]) {
       continue;
     }
     if (inFenceInside || /^\s*>/.test(inner)) continue;
-    const e = parseEntry(inner);
-    if (!e) continue;
-    if (ID_TYPES.has(e.type)) {
-      curExplicitId = e.value.trim();
-    } else if (PIVOT_TYPES.has(e.type)) {
-      edges.push({ to: e.value.trim(), label: e.comment, line: i, fromLine: cur.line });
-    } else {
-      cur.findings.push({ ...e, line: i, calloutTitle: cur.label });
+    for (const seg of expandWith(inner)) {
+      const e = parseEntry(seg);
+      if (!e) continue;
+      if (ID_TYPES.has(e.type)) {
+        curExplicitId = e.value.trim();
+      } else if (PIVOT_TYPES.has(e.type)) {
+        edges.push({ to: e.value.trim(), label: e.comment, line: i, fromLine: cur.line });
+      } else {
+        cur.findings.push({ ...e, line: i, calloutTitle: cur.label, tuple: seg !== inner });
+      }
     }
   }
   flush();
@@ -395,6 +435,7 @@ var CaseFindingsPlugin = class extends import_obsidian.Plugin {
   }
   async onload() {
     await this.loadSettings();
+    new import_obsidian.Notice(`Case Findings ${this.manifest.version} charg\xE9`, 2500);
     this.registerView(VIEW_TYPE, (leaf) => new FindingsView(leaf, this));
     this.addRibbonIcon("crosshair", "Findings de l'enqu\xEAte", () => this.activateView("right"));
     this.addCommand({
@@ -458,6 +499,14 @@ var CaseFindingsPlugin = class extends import_obsidian.Plugin {
     this.registerEvent(
       this.app.metadataCache.on("changed", (file, data) => {
         void this.indexFile(file, data).then(() => this.refreshViews());
+      })
+    );
+    const reindexOnModify = (0, import_obsidian.debounce)((file) => {
+      void this.indexFile(file).then(() => this.refreshViews());
+    }, 400, true);
+    this.registerEvent(
+      this.app.vault.on("modify", (f) => {
+        if (f instanceof import_obsidian.TFile && f.extension === "md") reindexOnModify(f);
       })
     );
     this.registerEvent(
@@ -873,7 +922,24 @@ var FindingsView = class extends import_obsidian.ItemView {
     th("Source", "source", "cf-col-source");
     th("", null, "cf-col-actions");
     const tbody = table.createEl("tbody");
-    for (const r of visible) this.renderRow(tbody, r, notesByKey, casesByKey);
+    const units = [];
+    const unitIdx = /* @__PURE__ */ new Map();
+    for (const r of visible) {
+      if (r.tuple) {
+        const k = r.file.path + ":" + r.line;
+        const existing = unitIdx.get(k);
+        if (existing !== void 0) {
+          units[existing].push(r);
+          continue;
+        }
+        unitIdx.set(k, units.length);
+      }
+      units.push([r]);
+    }
+    for (const u of units) {
+      if (u.length === 1) this.renderRow(tbody, u[0], notesByKey, casesByKey);
+      else this.renderTupleRow(tbody, u);
+    }
     const footer = el.createDiv({ cls: "cf-footer" });
     footer.setText(`${visible.length} / ${scoped.length} findings \xB7 ${new Set(scoped.map((r) => r.file.path)).size} note(s)`);
   }
@@ -1109,6 +1175,37 @@ var FindingsView = class extends import_obsidian.ItemView {
       { passive: false }
     );
     window.setTimeout(fit, 30);
+  }
+  renderTupleRow(tbody, members) {
+    const first = members[0];
+    const tr = tbody.createEl("tr", { cls: "cf-tuple-row" });
+    const tdType = tr.createEl("td", { cls: "cf-col-type" });
+    const badge = tdType.createSpan({ cls: "cf-badge cf-badge-tuple" });
+    (0, import_obsidian.setIcon)(badge.createSpan({ cls: "cf-badge-icon" }), "link");
+    badge.createSpan({ text: "tuple" });
+    const tdVal = tr.createEl("td", { cls: "cf-col-value" });
+    const grid = tdVal.createDiv({ cls: "cf-tuple-grid" });
+    for (const m of members) {
+      const field = grid.createDiv({ cls: "cf-tuple-field" });
+      const b = field.createSpan({ cls: "cf-badge" });
+      b.style.setProperty("--cf-hue", String(hueOf(m.type)));
+      (0, import_obsidian.setIcon)(b.createSpan({ cls: "cf-badge-icon" }), TYPE_ICONS[m.type] ?? "tag");
+      b.createSpan({ text: m.type });
+      const code = field.createEl("code", { cls: "cf-value", text: m.value, attr: { "aria-label": "Cliquer pour copier" } });
+      code.addEventListener("click", () => this.copy(m.value, `Copi\xE9 : ${truncate(m.value, 40)}`));
+    }
+    const comments = members.map((m) => m.comment).filter(Boolean).join(" \xB7 ");
+    tr.createEl("td", { cls: "cf-col-comment", text: comments });
+    const tdSrc = tr.createEl("td", { cls: "cf-col-source" });
+    const a = tdSrc.createEl("a", { cls: "cf-source-link", text: `${first.file.basename}:${first.line + 1}`, href: "#" });
+    a.addEventListener("click", (evt) => {
+      evt.preventDefault();
+      void this.openAt(first.file, first.line, import_obsidian.Keymap.isModEvent(evt));
+    });
+    const tdAct = tr.createEl("td", { cls: "cf-col-actions" });
+    const copyBtn = tdAct.createEl("button", { cls: "clickable-icon cf-icon-btn", attr: { "aria-label": "Copier le tuple (k=v)" } });
+    (0, import_obsidian.setIcon)(copyBtn, "copy");
+    copyBtn.addEventListener("click", () => this.copy(members.map((m) => `${m.type}=${m.value}`).join(" | "), "Tuple copi\xE9"));
   }
   renderEmpty(el) {
     const box = el.createDiv({ cls: "cf-empty" });

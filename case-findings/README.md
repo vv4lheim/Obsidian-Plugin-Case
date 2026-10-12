@@ -1,21 +1,19 @@
-# Case Findings 
+# Case Findings — plugin Obsidian
 
-Suivi des findings d'une enquête (CTF, DFIR, pentest) : notez vos trouvailles dans un callout `[!finding]`, et une hotkey affiche un tableau filtrable de tout ce que vous avez trouvé dans l'enquête, toutes notes confondues.
+Suivi des findings d'une enquête (CTF, DFIR, pentest) : tu notes tes trouvailles dans un callout `[!finding]`, et une hotkey t'affiche un tableau filtrable de tout ce que tu as trouvé dans l'enquête, toutes notes confondues.
 
 ## Installation
 
-1. Fermez Obsidian.
+1. Ferme Obsidian (ou pas, ça marche aussi à chaud).
 2. Copie le dossier `case-findings/` (celui qui contient `main.js`, `manifest.json`, `styles.css`) dans :
    ```
-   <vault>/.obsidian/plugins/case-findings/
+   <ton vault>/.obsidian/plugins/case-findings/
    ```
-3. Obsidian → **Paramètres → Plugins communautaires** → désactivez le mode restreint si besoin → activez **Case Findings**.
+3. Obsidian → **Paramètres → Plugins communautaires** → désactive le mode restreint si besoin → active **Case Findings**.
 
 > Avec Nextcloud : le dossier `.obsidian/plugins/` se synchronise comme le reste, le plugin sera dispo sur tes autres machines.
 
 ## Utilisation
-
-![findings](img/findings.png)
 
 ### 1. Rattacher les notes à une enquête
 
@@ -85,9 +83,55 @@ npm test        # tests du parser
 ```
 Code : `src/parser.ts` (parsing pur, testé) et `src/main.ts` (index, vue, commandes).
 
-## Pistes v2
+## Tuples — lier des donnees sur une ligne (« with »)
 
-- Onglet graphe (notes ↔ findings, valeurs partagées)
+Pour garder ensemble des infos qui vont de pair (un compte + son mot de passe + sa machine), separe-les par ` with ` sur une seule ligne :
+
+```markdown
+> [!finding] Comptes AD
+> id:: john with password:: test with server:: DC01
+> id:: alice with password:: Spring2024 with server:: WS01
+```
+
+Chaque bloc `type:: valeur` devient un champ du tuple. Dans le tableau, le tuple s'affiche sur une seule ligne (badge « tuple »), chaque valeur restant copiable, et le bouton copier copie tout en `k=v | k=v`. Ca marche aussi dans un noeud de graphe : `id:: web with user:: www-data with pivot:: root | vim`.
+
+Note : pour couper un tuple, chaque segment doit contenir `::`. Une phrase comme `note:: the with lait` n'est donc pas coupee.
+
+## Vue graphe — chemin d'attaque (pivots)
+
+Dans le panneau, le bouton **git-fork** (en haut a droite) bascule entre le tableau et le **graphe de l'enquete**. Les noeuds sont tes etapes (host, service), remplies de leurs findings ; les fleches, c'est **toi** qui les traces, pour marquer un pivot.
+
+### Declarer un noeud et un pivot
+
+```markdown
+> [!finding] WordPress 5.2
+> id:: wordpress
+> url:: http://10.10.11.20/blog/wp-admin | admin:admin123
+> cmd:: wpscan --url ... | plugin vulnerable
+> pivot:: webserver | upload plugin PHP malveillant (RCE)
+
+> [!finding] Shell www-data
+> id:: webserver
+> user:: www-data
+> cmd:: sudo -l | NOPASSWD /usr/bin/vim
+> pivot:: root | GTFOBins vim
+```
+
+- `id:: <nom-court>` nomme le noeud pour pouvoir le cibler. Sans `id::`, l'id est le titre du callout en slug.
+- `pivot:: <id cible> | <methode>` trace une fleche de ce noeud vers un autre, etiquetee par la methode. Le `| methode` est optionnel.
+- Un noeud peut avoir plusieurs pivots (plusieurs fleches sortantes).
+- Si une cible n'existe pas encore, un noeud fantome en pointilles « a documenter » apparait : c'est ton TODO.
+- Le graphe fusionne toutes les notes de l'enquete : une etape dans une note peut pivoter vers une etape declaree dans une autre.
+
+### Dans le graphe
+
+- Il se lit de gauche a droite (couches calculees automatiquement a partir des pivots).
+- Glisser pour deplacer, molette pour zoomer, bouton Ajuster pour recadrer.
+- Clic sur le titre d'un noeud = ouvre la note a la bonne ligne.
+- Clic sur une valeur = copiee.
+- Export (icone bas) -> Copier le graphe en Mermaid : colle-le dans un writeup, il se rend tout seul.
+
+## Pistes v3
+
 - Détection automatique des hashes / IP / emails hors callout (désactivable par enquête)
 - Export d'une note récapitulative pour le writeup
-

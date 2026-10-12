@@ -405,3 +405,27 @@
 	color: var(--text-faint);
 	font-size: var(--font-ui-smaller);
 }
+
+/* ---------- Tuples (lignes « with ») ---------- */
+.cf-tuple-row {
+	background: hsla(265, 50%, 50%, 0.05);
+}
+.cf-badge-tuple {
+	color: var(--text-accent);
+	background: hsla(265, 50%, 50%, 0.15);
+}
+.cf-tuple-grid {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+}
+.cf-tuple-field {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	min-width: 0;
+}
+.cf-tuple-field .cf-value {
+	flex: 1;
+	min-width: 0;
+}
