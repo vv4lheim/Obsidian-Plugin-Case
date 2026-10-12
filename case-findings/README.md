@@ -131,6 +131,14 @@ Dans le panneau, le bouton **git-fork** (en haut a droite) bascule entre le tabl
 - Clic sur une valeur = copiee.
 - Export (icone bas) -> Copier le graphe en Mermaid : colle-le dans un writeup, il se rend tout seul.
 
+## Nouveautés 0.4
+
+**Déplacer les nœuds du graphe.** Glisse un nœud où tu veux ; sa position est **sauvegardée** (par enquête) et survit au rechargement. Le fond se déplace toujours en glissant le vide. Bouton « réinitialiser les positions » (icône grille) pour revenir à la mise en page auto.
+
+**Trier le tableau.** Un sélecteur sous la recherche : ordre du fichier, par type, ou valeur A→Z / Z→A. (Les en-têtes de colonnes restent cliquables aussi.)
+
+**Exporter un type en .txt.** Filtre par type (clic sur une pastille, ex. `id` ou `password`), puis Export (⬇) → « Télécharger les … en .txt (1/ligne) ». Tu obtiens un fichier avec une valeur par ligne, prêt pour une wordlist / du brute force. Sans filtre, exporte toutes les valeurs visibles.
+
 ## Pistes v3
 
 - Détection automatique des hashes / IP / emails hors callout (désactivable par enquête)

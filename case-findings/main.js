@@ -357,7 +357,8 @@ var DEFAULT_SETTINGS = {
   calloutNames: "finding, findings",
   followActiveNote: true,
   showThumbnails: true,
-  caseField: "case"
+  caseField: "case",
+  nodePositions: {}
 };
 var DEFAULT_TYPES = [
   "hash",
@@ -432,6 +433,7 @@ var CaseFindingsPlugin = class extends import_obsidian.Plugin {
       250,
       true
     );
+    this.persistPositions = (0, import_obsidian.debounce)(() => void this.saveData(this.settings), 500, true);
   }
   async onload() {
     await this.loadSettings();
@@ -547,6 +549,14 @@ var CaseFindingsPlugin = class extends import_obsidian.Plugin {
   async saveSettings() {
     await this.saveData(this.settings);
     await this.reindexAll();
+  }
+  setNodePosition(key, x, y) {
+    this.settings.nodePositions[key] = { x, y };
+    this.persistPositions();
+  }
+  clearNodePositions(prefix) {
+    for (const k of Object.keys(this.settings.nodePositions)) if (k.startsWith(prefix)) delete this.settings.nodePositions[k];
+    void this.saveData(this.settings);
   }
   calloutNames() {
     return this.settings.calloutNames.split(",").map((s) => s.trim()).filter(Boolean);
@@ -839,6 +849,16 @@ var FindingsView = class extends import_obsidian.ItemView {
         (i) => i.setTitle("Copier les valeurs uniquement").setIcon("list").onClick(() => this.copy([...new Set(visible.map((r) => r.value))].join("\n"), "Valeurs copi\xE9es"))
       );
       m.addSeparator();
+      const txtLabel = this.typeFilter ? `T\xE9l\xE9charger les \xAB ${this.typeFilter} \xBB en .txt (1/ligne)` : "T\xE9l\xE9charger les valeurs en .txt (1/ligne)";
+      m.addItem(
+        (i) => i.setTitle(txtLabel).setIcon("file-down").onClick(() => {
+          const values = [...new Set(visible.map((r) => r.value))];
+          const scope = this.currentCase === ALL ? "all" : this.currentCase === NONE ? "sans-case" : this.currentCase;
+          const name = `${scope}_${this.typeFilter || "findings"}.txt`.replace(/[^\w.-]+/g, "-");
+          this.download(name, values.join("\n") + "\n");
+        })
+      );
+      m.addSeparator();
       m.addItem(
         (i) => i.setTitle("Copier le graphe en Mermaid").setIcon("git-fork").onClick(() => this.copy(toMermaid(this.plugin.graphForScope(this.scopePredicate())), "Graphe Mermaid copi\xE9"))
       );
@@ -875,6 +895,23 @@ var FindingsView = class extends import_obsidian.ItemView {
       input.focus();
       if (caret !== null) input.setSelectionRange(caret, caret);
     }
+    const sortSel = searchWrap.createEl("select", { cls: "dropdown cf-sort-select" });
+    const sortOpts = [
+      ["source", true, "Ordre du fichier"],
+      ["type", true, "Par type"],
+      ["value", true, "Valeur A\u2192Z"],
+      ["value", false, "Valeur Z\u2192A"]
+    ];
+    for (const [k, asc, label] of sortOpts) {
+      const o = sortSel.createEl("option", { text: label, value: `${k}:${asc}` });
+      if (this.sortKey === k && this.sortAsc === asc) o.selected = true;
+    }
+    sortSel.addEventListener("change", () => {
+      const [k, asc] = sortSel.value.split(":");
+      this.sortKey = k;
+      this.sortAsc = asc === "true";
+      this.render();
+    });
     const counts = /* @__PURE__ */ new Map();
     for (const r of scoped) counts.set(r.type, (counts.get(r.type) ?? 0) + 1);
     const chips = el.createDiv({ cls: "cf-chips" });
@@ -1020,12 +1057,25 @@ var FindingsView = class extends import_obsidian.ItemView {
     const COL = 290;
     const ROWH = 184;
     const PAD = 36;
-    const colCount = lay.cols;
-    const rowCount = Math.max(1, ...Array.from({ length: colCount }, (_, c) => lay.nodes.filter((n) => n.col === c).length));
-    const W = PAD * 2 + Math.max(1, colCount) * COL - (COL - NODE_W);
-    const H = PAD * 2 + Math.max(1, rowCount) * ROWH - (ROWH - NODE_H);
+    const posKey = (id) => `${this.currentCase}|${id}`;
     const pos = /* @__PURE__ */ new Map();
-    for (const n of lay.nodes) pos.set(n.id, { x: PAD + n.col * COL, y: PAD + n.row * ROWH, n });
+    for (const n of lay.nodes) {
+      const saved = this.plugin.settings.nodePositions[posKey(n.id)];
+      pos.set(n.id, {
+        x: saved ? saved.x : PAD + n.col * COL,
+        y: saved ? saved.y : PAD + n.row * ROWH,
+        n
+      });
+    }
+    const extent = () => {
+      let w = 400;
+      let h = 300;
+      for (const p of pos.values()) {
+        w = Math.max(w, p.x + NODE_W + PAD);
+        h = Math.max(h, p.y + NODE_H + PAD);
+      }
+      return { w, h };
+    };
     const bar = host.createDiv({ cls: "cf-graph-bar" });
     const mk = (icon, label, fn) => {
       const b = bar.createEl("button", { cls: "clickable-icon cf-icon-btn", attr: { "aria-label": label } });
@@ -1044,56 +1094,74 @@ var FindingsView = class extends import_obsidian.ItemView {
     svg.appendChild(defs);
     const root = document.createElementNS(svgNS, "g");
     svg.appendChild(root);
+    const edgeLayer = document.createElementNS(svgNS, "g");
+    const nodeLayer = document.createElementNS(svgNS, "g");
+    root.appendChild(edgeLayer);
+    root.appendChild(nodeLayer);
     const apply = () => root.setAttribute("transform", `translate(${this.gz.x},${this.gz.y}) scale(${this.gz.scale})`);
     const fit = () => {
+      const { w, h } = extent();
       const rect = canvas.getBoundingClientRect();
-      const s = Math.min((rect.width - 20) / W, (rect.height - 20) / H, 1.2);
-      this.gz.scale = s > 0 && isFinite(s) ? s : 1;
-      this.gz.x = Math.max(10, (rect.width - W * this.gz.scale) / 2);
+      const sc = Math.min((rect.width - 20) / w, (rect.height - 20) / h, 1.2);
+      this.gz.scale = sc > 0 && isFinite(sc) ? sc : 1;
+      this.gz.x = Math.max(10, (rect.width - w * this.gz.scale) / 2);
       this.gz.y = 16;
       apply();
     };
-    for (const e of lay.edges) {
-      const a = pos.get(e.from);
-      const b = pos.get(e.to);
-      if (!a || !b) continue;
+    const edgeEls = [];
+    const redrawEdge = (ee) => {
+      const a = pos.get(ee.e.from);
+      const b = pos.get(ee.e.to);
+      if (!a || !b) return;
       const x1 = a.x + NODE_W;
       const y1 = a.y + NODE_H / 2;
       const x2 = b.x;
       const y2 = b.y + NODE_H / 2;
       const dx = Math.max(40, Math.abs(x2 - x1) / 2);
-      const path = document.createElementNS(svgNS, "path");
-      path.setAttribute("class", "cf-edge");
-      path.setAttribute("d", `M ${x1} ${y1} C ${x1 + dx} ${y1}, ${x2 - dx} ${y2}, ${x2} ${y2}`);
-      path.setAttribute("marker-end", "url(#cf-arrow)");
-      root.appendChild(path);
-      if (e.label) {
+      ee.path.setAttribute("d", `M ${x1} ${y1} C ${x1 + dx} ${y1}, ${x2 - dx} ${y2}, ${x2} ${y2}`);
+      if (ee.label && ee.bg) {
         const mx = (x1 + x2) / 2;
         const my = (y1 + y2) / 2 - 6;
-        const t = document.createElementNS(svgNS, "text");
-        t.setAttribute("class", "cf-edge-label");
-        t.setAttribute("x", String(mx));
-        t.setAttribute("y", String(my));
-        t.setAttribute("text-anchor", "middle");
-        t.textContent = e.label.length > 32 ? e.label.slice(0, 31) + "\u2026" : e.label;
+        ee.label.setAttribute("x", String(mx));
+        ee.label.setAttribute("y", String(my));
+        const bb = safeBBox(ee.label);
+        ee.bg.setAttribute("x", String(bb.x - 4));
+        ee.bg.setAttribute("y", String(bb.y - 2));
+        ee.bg.setAttribute("width", String(bb.width + 8));
+        ee.bg.setAttribute("height", String(bb.height + 4));
+      }
+    };
+    for (const e of lay.edges) {
+      if (!pos.has(e.from) || !pos.has(e.to)) continue;
+      const path = document.createElementNS(svgNS, "path");
+      path.setAttribute("class", "cf-edge");
+      path.setAttribute("marker-end", "url(#cf-arrow)");
+      edgeLayer.appendChild(path);
+      const ee = { e, path };
+      if (e.label) {
         const bg = document.createElementNS(svgNS, "rect");
         bg.setAttribute("class", "cf-edge-label-bg");
-        root.appendChild(bg);
-        root.appendChild(t);
-        const bb = safeBBox(t);
-        bg.setAttribute("x", String(bb.x - 4));
-        bg.setAttribute("y", String(bb.y - 2));
-        bg.setAttribute("width", String(bb.width + 8));
-        bg.setAttribute("height", String(bb.height + 4));
         bg.setAttribute("rx", "3");
+        const t = document.createElementNS(svgNS, "text");
+        t.setAttribute("class", "cf-edge-label");
+        t.setAttribute("text-anchor", "middle");
+        t.textContent = e.label.length > 32 ? e.label.slice(0, 31) + "\u2026" : e.label;
+        edgeLayer.appendChild(bg);
+        edgeLayer.appendChild(t);
+        ee.label = t;
+        ee.bg = bg;
       }
+      edgeEls.push(ee);
     }
-    for (const { x, y, n } of pos.values()) {
+    const foById = /* @__PURE__ */ new Map();
+    for (const entry of pos.values()) {
+      const { n } = entry;
       const fo = document.createElementNS(svgNS, "foreignObject");
-      fo.setAttribute("x", String(x));
-      fo.setAttribute("y", String(y));
+      fo.setAttribute("x", String(entry.x));
+      fo.setAttribute("y", String(entry.y));
       fo.setAttribute("width", String(NODE_W));
       fo.setAttribute("height", String(NODE_H));
+      foById.set(n.id, fo);
       const card = document.createElement("div");
       card.className = "cf-gnode" + (n.line < 0 ? " cf-gnode-ghost" : "");
       card.style.setProperty("--cf-hue", String(hueOf(n.id)));
@@ -1123,8 +1191,49 @@ var FindingsView = class extends import_obsidian.ItemView {
       }
       if (n.findings.length > 5) list.createDiv({ cls: "cf-gnode-more", text: `+${n.findings.length - 5}` });
       fo.appendChild(card);
-      root.appendChild(fo);
+      nodeLayer.appendChild(fo);
+      let moved = false;
+      let startX = 0;
+      let startY = 0;
+      let origX = 0;
+      let origY = 0;
+      card.addEventListener("pointerdown", (ev) => {
+        if (ev.target.closest("code")) return;
+        ev.stopPropagation();
+        moved = false;
+        startX = ev.clientX;
+        startY = ev.clientY;
+        const cur = pos.get(n.id);
+        origX = cur.x;
+        origY = cur.y;
+        card.setPointerCapture(ev.pointerId);
+        card.addClass("cf-dragging");
+      });
+      card.addEventListener("pointermove", (ev) => {
+        if (!card.hasPointerCapture(ev.pointerId)) return;
+        const dx = (ev.clientX - startX) / this.gz.scale;
+        const dy = (ev.clientY - startY) / this.gz.scale;
+        if (Math.abs(ev.clientX - startX) + Math.abs(ev.clientY - startY) > 3) moved = true;
+        const cur = pos.get(n.id);
+        cur.x = origX + dx;
+        cur.y = origY + dy;
+        fo.setAttribute("x", String(cur.x));
+        fo.setAttribute("y", String(cur.y));
+        for (const ee of edgeEls) if (ee.e.from === n.id || ee.e.to === n.id) redrawEdge(ee);
+      });
+      const endDrag = (ev) => {
+        if (!card.hasPointerCapture(ev.pointerId)) return;
+        card.releasePointerCapture(ev.pointerId);
+        card.removeClass("cf-dragging");
+        if (moved) {
+          const cur = pos.get(n.id);
+          this.plugin.setNodePosition(posKey(n.id), Math.round(cur.x), Math.round(cur.y));
+        }
+      };
+      card.addEventListener("pointerup", endDrag);
+      card.addEventListener("pointercancel", endDrag);
     }
+    for (const ee of edgeEls) redrawEdge(ee);
     mk("maximize", "Ajuster \xE0 la fen\xEAtre", fit);
     mk("zoom-in", "Zoom +", () => {
       this.gz.scale = Math.min(2.5, this.gz.scale * 1.2);
@@ -1134,26 +1243,30 @@ var FindingsView = class extends import_obsidian.ItemView {
       this.gz.scale = Math.max(0.2, this.gz.scale / 1.2);
       apply();
     });
-    bar.createSpan({ cls: "cf-graph-hint", text: `${lay.nodes.length} \xE9tapes \xB7 glisser pour d\xE9placer, molette pour zoomer` });
-    let dragging = false;
+    mk("layout-grid", "R\xE9initialiser les positions", () => {
+      this.plugin.clearNodePositions(`${this.currentCase}|`);
+      this.render();
+    });
+    bar.createSpan({ cls: "cf-graph-hint", text: `${lay.nodes.length} \xE9tapes \xB7 glisse un n\u0153ud pour le d\xE9placer, le fond pour la vue, molette pour zoomer` });
+    let panning = false;
     let sx = 0;
     let sy = 0;
     canvas.addEventListener("pointerdown", (ev) => {
-      if (ev.target.closest(".cf-gnode-title, code")) return;
-      dragging = true;
+      if (ev.target.closest(".cf-gnode")) return;
+      panning = true;
       sx = ev.clientX - this.gz.x;
       sy = ev.clientY - this.gz.y;
       canvas.setPointerCapture(ev.pointerId);
       canvas.addClass("is-dragging");
     });
     canvas.addEventListener("pointermove", (ev) => {
-      if (!dragging) return;
+      if (!panning) return;
       this.gz.x = ev.clientX - sx;
       this.gz.y = ev.clientY - sy;
       apply();
     });
     const stop = () => {
-      dragging = false;
+      panning = false;
       canvas.removeClass("is-dragging");
     };
     canvas.addEventListener("pointerup", stop);
@@ -1243,6 +1356,26 @@ var FindingsView = class extends import_obsidian.ItemView {
       () => new import_obsidian.Notice(msg),
       () => new import_obsidian.Notice("Impossible de copier dans le presse-papiers")
     );
+  }
+  download(filename, text) {
+    try {
+      const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      a.style.display = "none";
+      document.body.appendChild(a);
+      a.click();
+      window.setTimeout(() => {
+        URL.revokeObjectURL(url);
+        a.remove();
+      }, 1e3);
+      new import_obsidian.Notice(`Fichier ${filename} t\xE9l\xE9charg\xE9`);
+    } catch (e) {
+      console.error("[case-findings] download", e);
+      new import_obsidian.Notice("\xC9chec du t\xE9l\xE9chargement");
+    }
   }
 };
 var ChoiceModal = class extends import_obsidian.SuggestModal {
